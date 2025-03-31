@@ -172,7 +172,8 @@ class SignalHandler:
         self._delayed = delayed
         self._logger = logger.get_logger()
         self._start_time = time.time()
-        self._usr_signal = False
+        self.is_busy = False
+        self.kill_file = job_paths._format_id(job_paths.folder / "%j_%t_kill.tmp")
 
     def has_timed_out(self) -> bool:
         # SignalHandler is created by submitit as soon as the process start,
@@ -201,14 +202,16 @@ class SignalHandler:
         # If job is cancelled this will trigger sys.exit. In other cases
         # (preemption or timeout) checkpointing (which is called first) will trigger sys.exit().
         time.sleep(1) # Sometimes the SIGTERM is quicker than SIGUSR2 when preempted
-        if self._usr_signal:
+        if self.is_busy:
             self.bypass(signum, frame)
         else:
+            self._logger.info(f"Caught signal {signal.Signals(signum).name} without {self.env.USR_SIG} -> Terminate.")
             self._exit()
 
     # pylint:disable=unused-argument
     def checkpoint_and_try_requeue(self, signum: int, frame: tp.Optional[types.FrameType] = None) -> None:
-        self._usr_signal = True
+        self.is_busy = True
+        
         timed_out = self.has_timed_out()
         case = "timed-out" if timed_out else "preempted"
         self._logger.warning(
@@ -218,7 +221,13 @@ class SignalHandler:
         procid = self.env.global_rank
         if procid != 0:
             self._logger.info(f"Not checkpointing nor requeuing since I am a slave (procid={procid}).")
-            return
+            while not self.kill_file.exists():
+                self._logger.info(f'Wait for master to finish')
+                time.sleep(5)
+            
+            self._logger.info(f"Found file {str(self.kill_file)}")
+            self.kill_file.unlink()
+            self._exit()
 
         delayed = self._delayed
         countdown = delayed._timeout_countdown - timed_out
@@ -264,6 +273,10 @@ class SignalHandler:
 
     def _exit(self) -> None:
         # extracted for mocking
+        if self.env.global_rank == 0:
+            for i in range(1, self.env.num_tasks):
+                (self._job_paths.folder / f"{self.env.job_id}_{i}_kill.tmp").touch()
+
         self._logger.info("Exiting gracefully.")
         sys.exit(-1)
 
