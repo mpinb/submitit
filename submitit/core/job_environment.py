@@ -221,12 +221,20 @@ class SignalHandler:
         procid = self.env.global_rank
         if procid != 0:
             self._logger.info(f"Not checkpointing nor requeuing since I am a slave (procid={procid}).")
-            while not self.kill_file.exists():
-                self._logger.info(f'Wait for master to finish')
-                time.sleep(5)
-            
-            self._logger.info(f"Found file {str(self.kill_file)}")
-            self.kill_file.unlink()
+            exit_delay = 90
+            update_delay = 10
+            self._logger.warning(
+                f'Give master {exit_delay} seconds to finish checkpoint ...'
+            )
+            while exit_delay > 0:
+                exit_delay -= update_delay
+                time.sleep(update_delay)
+                self._logger.warning(
+                    f'... {exit_delay} seconds left ...'
+                )
+            self._logger.warning(
+                '... time is up!'
+            )
             self._exit()
 
         delayed = self._delayed
@@ -273,10 +281,6 @@ class SignalHandler:
 
     def _exit(self) -> None:
         # extracted for mocking
-        if self.env.global_rank == 0:
-            for i in range(1, self.env.num_tasks):
-                (self._job_paths.folder / f"{self.env.job_id}_{i}_kill.tmp").touch()
-
         self._logger.info("Exiting gracefully.")
         sys.exit(-1)
 
