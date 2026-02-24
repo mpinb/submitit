@@ -2,7 +2,16 @@ name: Build, and run tests lint and format
 env:
     IN_GITHUB_ACTION: 1
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true  # cancel previous actions if pushed again
 
 jobs:
   build-linux:
@@ -71,5 +80,3 @@ jobs:
       run: |
         source activate ./ci_env
         make use_venv=0 format
-
-

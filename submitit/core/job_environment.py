@@ -155,6 +155,8 @@ class JobEnvironment:
         # A priori we don't need other signals anymore,
         # but still log them to make it easier to debug.
         signal.signal(signal.SIGCONT, handler.bypass)
+        # register user signal last just in case it overlaps with SIGTERM/SIGCONT
+        signal.signal(self._usr_sig(), handler.checkpoint_and_try_requeue)
 
     # pylint: disable=unused-argument
     def _requeue(self, countdown: int) -> None:
